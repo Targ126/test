@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 )
@@ -84,5 +85,25 @@ func (server *Server) Handler(conn net.Conn) {
 	server.mapLock.Unlock()
 
 	server.BoardCast(user, "已上线")
+
+	// 写操作
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := user.conn.Read(buf)
+			if err != nil && err != io.EOF {
+				fmt.Println("写操作错误：", err)
+				return
+			}
+			if n == 0 {
+				server.BoardCast(user, "已下线")
+				return
+			}
+			msg := buf[:n-1]
+			server.BoardCast(user, string(msg))
+		}
+
+	}()
+
 	//select {}
 }
