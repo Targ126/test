@@ -64,7 +64,16 @@ func (server *Server) ListenMessage() {
 
 		server.mapLock.Lock()
 		for _, user := range server.UserMap {
-			user.C <- msg
+			// 使用select避免阻塞
+			select {
+			case user.C <- msg:
+			case <-user.done:
+				// 用户已断开，跳过
+				continue
+			default:
+				// channel满了，跳过这个用户
+				fmt.Printf("用户 %s 的消息队列已满，跳过发送\n", user.Name)
+			}
 		}
 		server.mapLock.Unlock()
 	}
@@ -86,20 +95,32 @@ func (server *Server) Handler(conn net.Conn) {
 
 	// 对写操作进行监听
 	go func() {
+		defer func() {
+			// 确保在goroutine退出时清理用户
+			user.offline()
+		}()
+		
 		buf := make([]byte, 1024)
 		for {
 			n, err := user.conn.Read(buf)
 			if err != nil && err != io.EOF {
-				fmt.Println("用户写广播错误：", err)
+				fmt.Println("用户读取错误：", err)
 				return
 			}
 			if n == 0 {
-				user.offline()
+				// 连接已关闭
 				return
 			}
 			msg := buf[:n-1]
 			user.DoMessage(string(msg))
-			isLive <- true
+			
+			// 通知主循环用户还活着
+			select {
+			case isLive <- true:
+			case <-user.done:
+				// 用户已被踢，退出
+				return
+			}
 		}
 	}()
 
@@ -109,11 +130,12 @@ func (server *Server) Handler(conn net.Conn) {
 
 		case <-time.After(time.Second * 5):
 			user.sendMyself("长时间没动作，你被踢了")
-			//user.offline()
-
-			close(user.C)
-
-			conn.Close()
+			
+			// 给用户一点时间接收最后的消息
+			time.Sleep(100 * time.Millisecond)
+			
+			// 使用新的Close方法优雅关闭
+			user.Close()
 			return
 		}
 	}
