@@ -69,40 +69,34 @@ func (server *Server) ListenMessage() {
 	}
 }
 
-// BoardCast 将消息广播给 Message
-func (server *Server) BoardCast(user *User, message string) {
-	msg := "[" + user.Addr + "]: " + message
-	server.Message <- msg
+// BoardCase 将消息广播给 Message
+func (server *Server) BoardCase(user *User, message string) {
+	server.Message <- fmt.Sprintf("[" + user.Addr + "] " + user.Name + " : " + message)
 }
 
 // Handler 用户上线后的主流程
 func (server *Server) Handler(conn net.Conn) {
 	//fmt.Printf("New connection from %s %s\n", conn.RemoteAddr(), conn.LocalAddr())
-	user := NewUser(conn)
+	user := NewUser(conn, server)
 
-	server.mapLock.Lock()
-	server.UserMap[user.Addr] = user
-	server.mapLock.Unlock()
+	user.online()
 
-	server.BoardCast(user, "已上线")
-
-	// 写操作
+	// 对写操作进行监听
 	go func() {
 		buf := make([]byte, 1024)
 		for {
 			n, err := user.conn.Read(buf)
 			if err != nil && err != io.EOF {
-				fmt.Println("写操作错误：", err)
+				fmt.Println("用户写广播错误：", err)
 				return
 			}
 			if n == 0 {
-				server.BoardCast(user, "已下线")
+				user.offline()
 				return
 			}
 			msg := buf[:n-1]
-			server.BoardCast(user, string(msg))
+			user.DoMessage(string(msg))
 		}
-
 	}()
 
 	//select {}
